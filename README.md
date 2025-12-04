@@ -1,3 +1,40 @@
+```
+                     .sssssssss.
+                   .sssssssssssssssssss
+                 sssssssssssssssssssssssss
+                ssssssssssssssssssssssssssss
+                 @@sssssssssssssssssssssss@ss
+                 |s@@@@sssssssssssssss@@@@s|s
+          _______|sssss@@@@@sssss@@@@@sssss|s
+        /         sssssssss@sssss@sssssssss|s
+       /  .------+.ssssssss@sssss@ssssssss.|
+      /  /       |...sssssss@sss@sssssss...|
+     |  |        |.......sss@sss@ssss......|
+     |  |        |..........s@ss@sss.......|
+     |  |        |...........@ss@..........|
+      \  \       |............ss@..........|
+       \  '------+...........ss@...........|
+        \________ .........................|
+                 |.........................|
+                /...........................\
+               |.............................|
+                  |.......................|
+                      |...............|
+
+
+          ___  ____  ____  ____   ___  ____  ____
+         | _ )| ___|| ___|| _ \  / _ \| _  \/ ___|
+         | _ \| __| | __| |   / | (_) | |_) \___ \
+         |___/|____||____||_|_\  \___/|  __/ |___/
+                                      |_|
+
+         Automated HashiCorp Infrastructure
+              Consul • Nomad • Vault
+                 Ansible Playbooks
+
+                  🍺 Cheers! 🍺
+```
+
 # HashiCorp Infrastructure Deployment
 
 This repository contains Ansible playbooks to deploy a complete HashiCorp infrastructure stack with service discovery, workload orchestration, secret management, and observability.
