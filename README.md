@@ -16,10 +16,28 @@ Before you begin, ensure you have the following:
 
 ## Architecture
 
-The infrastructure consists of:
+The infrastructure uses two distinct machine types:
 
-- **3 server nodes** (10.1.0.3-5): Run Consul servers, Nomad servers, and Vault servers
-- **6 client nodes** (10.1.0.6-11): Run Nomad clients for workload execution
+### Server Nodes
+
+Server nodes run the control plane for all HashiCorp services:
+
+- **Consul Server**: Maintains the service catalog, provides service discovery, and stores key-value data
+- **Nomad Server**: Schedules and orchestrates workloads across client nodes
+- **Vault Server**: Manages secrets and provides encryption services (uses Consul as storage backend)
+- **Consul Client**: Registers local services and forwards queries to Consul servers
+
+Server nodes form high-availability clusters (typically 3 or 5 nodes for quorum).
+
+### Client Nodes
+
+Client nodes run workloads and execute tasks:
+
+- **Nomad Client**: Executes containerized workloads scheduled by Nomad servers
+- **Consul Client**: Registers services running on the node and provides service discovery
+- **Alloy Agent**: Collects metrics, logs, and traces from workloads and system
+
+Client nodes are where your applications run. You can scale client nodes horizontally based on workload requirements.
 
 ### Service Layout
 
@@ -110,15 +128,33 @@ Alloy collects metrics and logs from all nodes and forwards them to your observa
 
 ### Inventory
 
-The inventory file defines all cluster nodes. Modify the `inventory` file to match your infrastructure:
+The inventory file defines all cluster nodes and assigns them to groups. The inventory file uses two groups:
+
+- **`[server]`**: Nodes that run Consul servers, Nomad servers, and Vault servers
+- **`[client]`**: Nodes that run Nomad clients for executing workloads
+
+Example inventory configuration:
 
 ```ini
-nomad-server-1 ansible_host='10.1.0.3'  ansible_user='core'
-nomad-server-2 ansible_host='10.1.0.4'  ansible_user='core'
-nomad-server-3 ansible_host='10.1.0.5'  ansible_user='core'
+# Individual node definitions
+server-1 ansible_host='10.0.0.10' ansible_user='core'
+server-2 ansible_host='10.0.0.11' ansible_user='core'
+server-3 ansible_host='10.0.0.12' ansible_user='core'
+client-1 ansible_host='10.0.0.20' ansible_user='core'
+client-2 ansible_host='10.0.0.21' ansible_user='core'
+
+# Group assignments
+[server]
+server-1
+server-2
+server-3
+
+[client]
+client-1
+client-2
 ```
 
-Update the IP addresses and hostnames for your environment.
+Update the hostnames, IP addresses, and group assignments to match your infrastructure. Server nodes should be in the `[server]` group, and client nodes should be in the `[client]` group.
 
 ### Service Configuration Files
 
