@@ -1,0 +1,41 @@
+# Vault credentials and secrets
+vault-credentials.json
+unseal-keys
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Sensitive configuration files
+.env
+.env.local
+*.secret
+
+# Ansible vault passwords
+.vault_pass
+vault_pass.txt
+
+# SSH keys
+id_rsa
+id_ed25519
+*.pub
+
+# Backup files
+*.backup
+*.bak
+*-backup.json
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.log

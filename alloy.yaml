@@ -1,0 +1,99 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install alloy binary
+  gather_facts: false
+  hosts: all
+  become: true
+  vars:
+    alloy_version: 1.12.0
+  tasks:
+    - name: Define expected alloy version
+      set_fact:
+        expected_alloy_version: "{{ alloy_version }}"
+
+    - name: Set architecture mapping for alloy binary
+      set_fact:
+        alloy_arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+
+    - name: Get system architecture
+      raw: uname -m | grep -E '(x86_64|aarch64)' || echo "unknown"
+      register: system_arch
+      changed_when: false
+
+    - name: Set alloy architecture
+      set_fact:
+        alloy_arch: "{{ 'amd64' if 'x86_64' in system_arch.stdout else 'arm64' if 'aarch64' in system_arch.stdout else 'unknown' }}"
+
+    - name: Get alloy version
+      raw: "PATH=/opt/bin:$PATH alloy-linux-{{ alloy_arch }} version | awk '{print $2}' | tr -d 'v'"
+      register: host_alloy_version
+      changed_when: false
+      ignore_errors: true # Prevents playbook failure if alloy is missing
+
+    - name: Check if alloy is installed
+      debug:
+        msg: "alloy is not installed."
+      when: host_alloy_version.rc != 0
+
+    - name: Debug alloy version
+      debug:
+        msg: "Installed alloy version is {{ host_alloy_version.stdout }}"
+      when: host_alloy_version.rc == 0
+
+    - name: Create /opt/bin for binaries
+      raw: mkdir -p /opt/bin
+
+    - name: Create /opt/alloy for binaries
+      raw: mkdir -p /opt/alloy
+
+    - name: Download alloy archive
+      raw: wget -q -P /tmp https://github.com/grafana/alloy/releases/download/v{{ alloy_version }}/alloy-linux-{{ alloy_arch }}.zip
+      #when:
+      #  - host_alloy_version.rc != 0  # Runs if alloy is not installed
+      #  - or host_alloy_version.stdout is not version(expected_alloy_version, '==')  # Runs if the version is different
+
+    - name: Extract alloy archive
+      raw: |
+        if ! command -v unzip >/dev/null 2>&1; then
+          busybox unzip -o /tmp/alloy-linux-{{ alloy_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        else
+          unzip -o /tmp/alloy-linux-{{ alloy_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        fi
+      #when:
+      #  - host_alloy_version.rc != 0  # Runs if alloy is not installed
+      #  - or host_alloy_version.stdout is not version(expected_alloy_version, '==')  # Runs if the version is different
+
+    - name: Remove archive
+      raw: rm -rf /tmp/alloy-linux-{{ alloy_arch }}.zip
+      #when:
+      #  - host_alloy_version.rc != 0  # Runs if alloy is not installed
+      #  - or host_alloy_version.stdout is not version(expected_alloy_version, '==')  # Runs if the version is different
+
+    - name: Configure Alloy
+      ansible.posix.synchronize:
+        src: files/alloy-{{ alloy_arch }}.service
+        dest: /etc/systemd/system/alloy.service
+
+    - name: Configure Alloy
+      ansible.posix.synchronize:
+        src: files/config.alloy
+        dest: /etc/config.alloy
+
+    - name: Configure Alloy
+      ansible.posix.synchronize:
+        src: files/alloy
+        dest: /etc/default/alloy
+
+    - name: make alloy executable
+      raw: chmod +x /opt/bin/alloy-linux-{{ alloy_arch }}
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable alloy
+      raw: systemctl enable alloy
+
+    - name: restart alloy
+      raw: systemctl restart alloy

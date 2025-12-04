@@ -1,0 +1,22 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: Unseal Vault cluster
+  gather_facts: false
+  hosts: server
+  become: true
+  tasks:
+    - name: Run auto-unseal script
+      raw: /etc/vault.d/vault-unseal.sh
+      register: unseal_result
+
+    - name: Display unseal result
+      debug:
+        var: unseal_result.stdout_lines
+
+    - name: Check Vault status
+      raw: VAULT_ADDR=http://localhost:8200 /opt/bin/vault status
+      register: vault_status
+
+    - name: Display Vault status
+      debug:
+        var: vault_status.stdout_lines

@@ -1,0 +1,21 @@
+[Unit]
+Description=Vault Server
+After=network-online.target
+After=consul.service
+Wants=network-online.target
+Requires=consul.service
+
+[Service]
+ExecStartPre=/bin/bash -c '(while ! nc -z -v -w1 localhost 8500 2>/dev/null; do echo "Waiting for Consul on port 8500..."; sleep 2; done); sleep 2'
+ExecStart=/opt/bin/vault server -config=/etc/vault.d/vault.hcl
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+User=root
+Environment=VAULT_ADDR=https://127.0.0.1:8200
+Environment=VAULT_CACERT=/etc/vault.d/ca.pem
+
+[Install]
+WantedBy=multi-user.target

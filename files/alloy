@@ -1,0 +1,41 @@
+## Path:
+## Description: Grafana Alloy settings
+## Type:        string
+## Default:     ""
+## ServiceRestart: alloy
+#
+# Command line options for alloy
+#
+# The configuration file holding the Grafana Alloy configuration.
+CONFIG_FILE="/etc/config.alloy"
+
+# User-defined arguments to pass to the run command.
+CUSTOM_ARGS=""
+
+# Restart on system upgrade. Defaults to true.
+RESTART_ON_UPGRADE=true
+
+# Cluster configuration
+CLUSTER_NAME="my-cluster"
+CLUSTER_JOIN_ADDRESSES="node1.example.com,node2.example.com,node3.example.com"
+
+# Observability endpoints
+LOKI_ENDPOINT="https://loki.example.com/loki/api/v1/push"
+LOKI_USERNAME=""
+LOKI_PASSWORD=""
+LOKI_OTLP_ENDPOINT="https://loki.example.com/otlp"
+
+TEMPO_ENDPOINT="https://tempo.example.com"
+
+MIMIR_ENDPOINT="https://mimir.example.com/otlp"
+
+# Cloud region identifier
+CLOUD_REGION="my-region"
+
+# Organization ID for multi-tenancy
+ORG_ID="my-org"
+
+# Optional: Grafana Cloud configuration
+GRAFANA_CLOUD_ENDPOINT="https://otlp-gateway-prod-eu-west-2.grafana.net/otlp"
+GRAFANA_CLOUD_USERNAME=""
+GRAFANA_CLOUD_PASSWORD=""

@@ -1,0 +1,22 @@
+nomad-server-1 ansible_host='10.1.0.3'  ansible_user='core'
+nomad-server-2 ansible_host='10.1.0.4'  ansible_user='core'
+nomad-server-3 ansible_host='10.1.0.5'  ansible_user='core'
+nomad-client-1 ansible_host='10.1.0.6'  ansible_user='core'
+nomad-client-2 ansible_host='10.1.0.7'  ansible_user='core'
+nomad-client-3 ansible_host='10.1.0.8'  ansible_user='core'
+nomad-client-4 ansible_host='10.1.0.9'  ansible_user='core'
+nomad-client-5 ansible_host='10.1.0.10' ansible_user='core'
+nomad-client-6 ansible_host='10.1.0.11' ansible_user='core'
+
+[server]
+nomad-server-1
+nomad-server-2
+nomad-server-3
+
+[client]
+nomad-client-1
+nomad-client-2
+nomad-client-3
+nomad-client-4
+nomad-client-5
+nomad-client-6

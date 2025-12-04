@@ -1,0 +1,513 @@
+discovery.consul "metrics_self_self_discover_all" { }
+
+discovery.consul "metrics_self_nomad" {
+	services = ["nomad-client", "nomad"]
+}
+
+discovery.relabel "metrics_self_self_discover_all" {
+	targets = discovery.consul.metrics_self_self_discover_all.targets
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		regex         = constants.hostname
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_tags"]
+		regex         = ".*,metric,.*"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_service"]
+		target_label  = "job"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		target_label  = "instance"
+		replacement   = constants.hostname
+	}
+}
+
+discovery.relabel "metrics_self_nomad" {
+	targets = discovery.consul.metrics_self_nomad.targets
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		regex         = constants.hostname
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_tags"]
+		regex         = "(.*)http(.*)"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		target_label  = "instance"
+		replacement   = constants.hostname
+	}
+}
+
+// self discovery of all nomad deployed service metrics
+prometheus.scrape "metrics_self_self_discover_all" {
+	targets         = discovery.relabel.metrics_self_self_discover_all.output
+	forward_to      = [otelcol.receiver.prometheus.metrics.receiver]
+	job_name        = "self-discover-all"
+	scrape_interval = "15s"
+}
+
+prometheus.scrape "metrics_self_nomad" {
+	targets    = discovery.relabel.metrics_self_nomad.output
+	forward_to = [otelcol.receiver.prometheus.metrics.receiver]
+	job_name   = "nomad"
+	params     = {
+		format = ["prometheus"],
+	}
+	scrape_interval = "15s"
+	metrics_path    = "/v1/metrics"
+}
+
+prometheus.exporter.cadvisor "docker" {
+	docker_host      = "unix:///var/run/docker.sock"
+	storage_duration = "5m"
+}
+
+// Configure a prometheus.scrape component to collect cadvisor metrics.
+prometheus.scrape "scraper" {
+	targets    = prometheus.exporter.cadvisor.docker.targets
+	forward_to = [otelcol.receiver.prometheus.metrics.receiver]
+}
+
+otelcol.receiver.prometheus "metrics" {
+	output {
+		metrics = [otelcol.processor.attributes.metrics.input]
+	}
+}
+
+otelcol.processor.attributes "metrics" {
+	action {
+		key    = "cloud.region"
+		value  = env("CLOUD_REGION")
+		action = "upsert"
+	}
+
+	output {
+		metrics = [otelcol.processor.batch.default.input]
+	}
+}
+
+discovery.relabel "journal" {
+	targets = []
+
+	rule {
+		source_labels = ["__journal__systemd_unit"]
+		target_label  = "service_name"
+		regex         = "(.+)\\.service"
+		replacement   = "$1"
+	}
+
+	rule {
+		source_labels = ["__journal__boot_id"]
+		target_label  = "boot_id"
+	}
+
+	rule {
+		source_labels = ["__journal__transport"]
+		target_label  = "transport"
+	}
+
+	rule {
+		source_labels = ["__journal_priority_keyword"]
+		target_label  = "level"
+	}
+
+	rule {
+		source_labels = ["__journal__hostname"]
+		target_label  = "instance"
+	}
+
+	rule {
+		source_labels = ["__journal__kernel_device"]
+		target_label  = "kernel_device"
+	}
+
+	rule {
+		source_labels = ["__journal__kernel_subsystem"]
+		target_label  = "kernel_subsystem"
+	}
+
+	rule {
+		source_labels = ["__journal__udev_sysname"]
+		target_label  = "udev_sysname"
+	}
+
+	rule {
+		source_labels = ["__journal__udev_devnode"]
+		target_label  = "udev_devnode"
+	}
+
+	rule {
+		source_labels = ["__journal__udev_devlink"]
+		target_label  = "udev_devlink"
+	}
+}
+
+loki.source.journal "journal" {
+	max_age       = "12h0m0s"
+	relabel_rules = discovery.relabel.journal.rules
+	forward_to    = [loki.process.journal.receiver]
+	labels        = {
+		job = "systemd-journal",
+	}
+}
+
+loki.process "journal" {
+	forward_to = [loki.write.logs_default.receiver]
+
+	stage.match {
+		selector = "{service_name=\"alloy\"}"
+
+		stage.logfmt {
+			mapping = {
+				timestamp = "ts",
+				log_level = "level",
+				message   = "msg",
+				service   = "service",
+			}
+		}
+
+		stage.timestamp {
+			source = "timestamp"
+			format = "RFC3339Nano"
+		}
+
+		stage.label_drop {
+			values = ["job"]
+		}
+
+		stage.static_labels {
+			values = {
+				job = "integrations/alloy",
+			}
+		}
+
+		stage.labels {
+			values = {
+				level = "log_level",
+			}
+		}
+	}
+
+	stage.match {
+		selector = "{transport=\"kernel\"}"
+
+		stage.static_labels {
+			values = {
+				service_name = "kernel",
+			}
+		}
+	}
+}
+
+// discovery of all nomad deployed services
+discovery.consul "logs_default_nomad_logs" { }
+
+discovery.relabel "logs_default_nomad_logs" {
+	targets = discovery.consul.logs_default_nomad_logs.targets
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		regex         = constants.hostname
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_tags"]
+		regex         = ".*,log,.*"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		target_label  = "__host__"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_service_metadata_external_source"]
+		target_label  = "job"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_service_id"]
+		regex         = "_nomad-task-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-.*"
+		target_label  = "task_id"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_service"]
+		target_label  = "service_name"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_node"]
+		target_label  = "host"
+	}
+
+	rule {
+		source_labels = ["__meta_consul_service_id"]
+		regex         = "_nomad-task-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})-.*"
+		target_label  = "__path__"
+		replacement   = "/opt/nomad/alloc/$1/alloc/logs/*std*.[0-9]*"
+	}
+}
+
+local.file_match "logs_default_nomad_logs" {
+	path_targets = discovery.relabel.logs_default_nomad_logs.output
+}
+
+loki.process "logs_default_nomad_logs" {
+	forward_to = [loki.write.logs_default.receiver]
+
+	stage.match {
+		selector = "{unit=\"kafka-plain\"}"
+
+		stage.multiline {
+			firstline     = "\\[\\d{4}(?:-\\d\\d){2} \\d\\d(?::\\d\\d){2},\\d\\d\\d\\] "
+			max_lines     = 512
+			max_wait_time = "15s"
+		}
+
+		stage.regex {
+			expression = "(?s)\\[(?P<time>\\d{4}(?:-\\d\\d){2} \\d\\d(?::\\d\\d){2},\\d\\d\\d)\\]\\s+(?P<stream>\\S+)\\s+\\[(?P<component>(?s:.*))\\]\\s+(?P<message>(?s:.*))"
+		}
+
+		stage.labels {
+			values = {
+				stream = null,
+			}
+		}
+		pipeline_name = "kafka"
+	}
+
+	stage.match {
+		selector = "{unit=\"autodiscovery\"}"
+
+		stage.regex {
+			expression = "(?P<timestamp>[a-zA-Z]{3} \\d{1,2} \\d{1,2}:\\d{2}:\\d{2})\\s(?P<host>\\S+)\\s(?P<message>.*)"
+		}
+
+		stage.timestamp {
+			source = "timestamp"
+			format = "Jan _2 15:04:05"
+		}
+		pipeline_name = "mail"
+	}
+}
+
+loki.source.file "logs_default_nomad_logs" {
+	targets               = local.file_match.logs_default_nomad_logs.targets
+	forward_to            = [loki.process.logs_default_nomad_logs.receiver]
+	legacy_positions_file = "/tmp/positions.yaml"
+}
+
+loki.write "logs_default" {
+	endpoint {
+		url = env("LOKI_ENDPOINT")
+
+		basic_auth {
+			username = env("LOKI_USERNAME")
+			password = env("LOKI_PASSWORD")
+		}
+	}
+	external_labels = {
+		cluster      = env("CLUSTER_NAME"),
+		cloud_region = env("CLOUD_REGION"),
+	}
+}
+
+////////////////////
+
+prometheus.exporter.self "integrations_agent" { }
+
+discovery.relabel "integrations_agent" {
+	targets = prometheus.exporter.self.integrations_agent.targets
+
+	rule {
+		replacement  = constants.hostname
+		target_label = "instance"
+	}
+
+	rule {
+		target_label = "job"
+		replacement  = "integrations/alloy"
+	}
+
+	rule {
+		target_label = "cluster"
+		replacement  = env("CLUSTER_NAME")
+	}
+}
+
+prometheus.scrape "integrations_agent" {
+	targets         = discovery.relabel.integrations_agent.output
+	forward_to      = [otelcol.receiver.prometheus.metrics.receiver]
+	job_name        = "integrations/alloy"
+	scrape_interval = "15s"
+}
+
+prometheus.exporter.consul "integrations_consul_exporter" { }
+
+discovery.relabel "integrations_consul_exporter" {
+	targets = prometheus.exporter.consul.integrations_consul_exporter.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "integrations/consul_exporter"
+	}
+}
+
+prometheus.scrape "integrations_consul_exporter" {
+	targets         = discovery.relabel.integrations_consul_exporter.output
+	forward_to      = [otelcol.receiver.prometheus.metrics.receiver]
+	job_name        = "integrations/consul_exporter"
+	scrape_interval = "15s"
+}
+
+prometheus.exporter.unix "integrations_node_exporter" {
+	include_exporter_metrics = true
+	enable_collectors        = ["systemd"]
+	disable_collectors       = ["mdadm"]
+}
+
+discovery.relabel "integrations_node_exporter" {
+	targets = prometheus.exporter.unix.integrations_node_exporter.targets
+
+	rule {
+		target_label = "job"
+		replacement  = "integrations/node_exporter"
+	}
+}
+
+prometheus.scrape "integrations_node_exporter" {
+	targets         = discovery.relabel.integrations_node_exporter.output
+	forward_to      = [otelcol.receiver.prometheus.metrics.receiver]
+	job_name        = "integrations/node_exporter"
+	scrape_interval = "15s"
+}
+
+// begin own tracing
+tracing {
+	sampling_fraction = 0.1
+	//write_to          = [otelcol.exporter.otlphttp.cloud.input]
+	write_to = [otelcol.processor.batch.default.input]
+}
+
+otelcol.receiver.jaeger "default" {
+	protocols {
+		grpc { }
+
+		thrift_http { }
+
+		thrift_binary { }
+
+		thrift_compact { }
+	}
+
+	output {
+		traces = [otelcol.processor.batch.default.input]
+	}
+}
+
+// batch processing bigger send batch means more signals in one batch but also uses higher saturation of line 
+otelcol.processor.batch "default" {
+	send_batch_size     = 1000
+	send_batch_max_size = 1000
+	timeout             = "200ms"
+
+	output {
+		traces  = [otelcol.exporter.otlphttp.cloud_traces.input, otelcol.exporter.otlphttp.grafana_cloud.input]
+		metrics = [otelcol.exporter.otlphttp.cloud_metrics.input, otelcol.exporter.otlphttp.nomad_mimir.input]
+		logs    = [otelcol.exporter.otlphttp.cloud_logs.input, otelcol.exporter.otlphttp.grafana_cloud.input]
+	}
+}
+
+// local tempo endpoint
+otelcol.exporter.otlphttp "cloud_traces" {
+	client {
+		endpoint = env("TEMPO_ENDPOINT")
+	}
+
+	sending_queue {
+		num_consumers = 30
+		queue_size    = 1000
+	}
+}
+
+// local mimir endpoint
+otelcol.exporter.otlphttp "cloud_metrics" {
+	client {
+		endpoint = env("MIMIR_ENDPOINT")
+	}
+
+	sending_queue {
+		num_consumers = 30
+		queue_size    = 1000
+	}
+}
+
+// local loki endpoint
+otelcol.exporter.otlphttp "cloud_logs" {
+	client {
+		endpoint = env("LOKI_OTLP_ENDPOINT")
+	}
+
+	sending_queue {
+		num_consumers = 30
+		queue_size    = 1000
+	}
+}
+
+// grafana cloud endpoint (optional)
+otelcol.exporter.otlphttp "grafana_cloud" {
+	client {
+		endpoint = env("GRAFANA_CLOUD_ENDPOINT")
+		auth     = otelcol.auth.basic.grafana_cloud.handler
+	}
+}
+
+// nomad mimir endpoint
+otelcol.exporter.otlphttp "nomad_mimir" {
+	client {
+		endpoint = "http://mimir.service.consul/otlp"
+		auth     = otelcol.auth.headers.org_id.handler
+	}
+}
+
+otelcol.auth.headers "org_id" {
+	header {
+		key   = "X-Scope-OrgID"
+		value = env("ORG_ID")
+	}
+}
+
+otelcol.auth.basic "grafana_cloud" {
+	username = env("GRAFANA_CLOUD_USERNAME")
+	password = env("GRAFANA_CLOUD_PASSWORD")
+}
+
+otelcol.receiver.otlp "local" {
+	grpc { }
+
+	http { }
+	// output -> only one atm.
+	output {
+		metrics = [otelcol.processor.batch.default.input]
+		logs    = [otelcol.processor.batch.default.input]
+		traces  = [otelcol.processor.batch.default.input]
+	}
+}

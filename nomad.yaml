@@ -1,0 +1,74 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install nomad binary
+  gather_facts: false
+  hosts: all
+  become: true
+  vars:
+    nomad_version: 1.10.4
+  tasks:
+    - name: Set architecture mapping for nomad binary
+      set_fact:
+        nomad_arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+
+    - name: Get system architecture
+      raw: uname -m | grep -E '(x86_64|aarch64)' || echo "unknown"
+      register: system_arch
+      changed_when: false
+
+    - name: Set nomad architecture
+      set_fact:
+        nomad_arch: "{{ 'amd64' if 'x86_64' in system_arch.stdout else 'arm64' if 'aarch64' in system_arch.stdout else 'unknown' }}"
+    - name: Create /opt/bin for binaries
+      raw: mkdir -p /opt/bin
+
+    - name: Create /etc/nomad.d for configs
+      raw: mkdir -p /etc/nomad.d
+
+    - name: Download nomad archive
+      raw: wget -q -P /tmp https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_linux_{{ nomad_arch }}.zip
+
+    - name: Extract nomad archive
+      raw: |
+        if ! command -v unzip >/dev/null 2>&1; then
+          busybox unzip -o /tmp/nomad_{{ nomad_version }}_linux_{{ nomad_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        else
+          unzip -o /tmp/nomad_{{ nomad_version }}_linux_{{ nomad_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        fi
+
+    - name: Remove archive
+      raw: rm -rf /tmp/nomad_{{ nomad_version }}_linux_{{ nomad_arch }}.zip
+
+    - name: Configure server service file
+      ansible.posix.synchronize:
+        src: files/nomad-server.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'server' in group_names"
+
+    - name: Configure client service file
+      ansible.posix.synchronize:
+        src: files/nomad-client.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'client' in group_names"
+
+    - name: Configure client
+      ansible.posix.synchronize:
+        src: files/client.hcl
+        dest: /etc/nomad.d/client.hcl
+      when: "'client' in group_names"
+
+    - name: Configure client
+      ansible.posix.synchronize:
+        src: files/nomad-metrics.json
+        dest: /etc/nomad.d/nomad-metrics.json
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable nomad
+      raw: systemctl enable nomad
+
+    - name: restart nomad
+      raw: systemctl restart nomad

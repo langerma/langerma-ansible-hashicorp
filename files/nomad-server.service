@@ -1,0 +1,23 @@
+[Unit]
+Description=Nomad Agent
+After=network.target
+After=consul.service
+Requires=network-online.target
+Requires=consul.service
+
+[Service]
+ExecStartPre=/bin/bash -c '(while ! nc -z -v -w1 localhost 8500 2>/dev/null; do echo "Waiting for port 8500 to open..."; sleep 2; done); sleep 2'
+ExecStart=/opt/bin/nomad agent -server -bootstrap-expect=3 \
+  -data-dir=/opt/nomad \
+  -config=/etc/nomad.d \
+  -dc=morsegasse \
+  -bind=0.0.0.0 \
+  -network-interface='{{ GetPrivateInterfaces | include "network" "10.0.0.0/8" | attr "name" }}' \
+  -consul-address=127.0.0.1:8500
+Restart=always
+RestartSec=10
+LimitNOFILE=65536
+User=root
+
+[Install]
+WantedBy=multi-user.target

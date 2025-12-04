@@ -1,0 +1,290 @@
+#!/usr/bin/env ansible-playbook
+---
+- hosts: server[0]  # Run on first vault server only
+  become: false
+  gather_facts: true
+  vars:
+    vault_addr: "{{ ansible_default_ipv4.address }}:8200"
+    vault_credentials: "{{ lookup('file', 'vault-credentials.json') | from_json }}"
+    vault_root_token: "{{ vault_credentials.root_token }}"
+
+  vars_prompt:
+    - name: admin_username
+      prompt: "Enter admin username"
+      default: "admin"
+      private: false
+
+    - name: admin_password
+      prompt: "Enter admin password"
+      private: true
+      confirm: true
+
+  tasks:
+    - name: Wait for Vault to be available
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/health"
+        method: GET
+      register: vault_health
+      until: vault_health.status == 200
+      retries: 30
+      delay: 10
+
+    - name: Check if userpass auth method is enabled
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/auth"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+      register: auth_methods
+
+    - name: Enable userpass auth method
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/auth/userpass"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          type: "userpass"
+        status_code: [200, 204]
+      when: "'userpass/' not in auth_methods.json"
+
+    - name: Create admin policy
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/policies/acl/admin"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          policy: |
+            # Full admin permissions
+            path "*" {
+              capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+            }
+        status_code: [200, 204]
+
+    - name: Create vault-admin policy (more restricted)
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/policies/acl/vault-admin"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          policy: |
+            # Manage auth methods
+            path "auth/*" {
+              capabilities = ["create", "read", "update", "delete", "list", "sudo"]
+            }
+
+            # Create and manage policies
+            path "sys/policies/acl/*" {
+              capabilities = ["create", "read", "update", "delete", "list"]
+            }
+
+            # Manage secret engines
+            path "sys/mounts/*" {
+              capabilities = ["create", "read", "update", "delete", "list"]
+            }
+
+            # List existing secret engines
+            path "sys/mounts" {
+              capabilities = ["read"]
+            }
+
+            # Read system health and status
+            path "sys/health" {
+              capabilities = ["read"]
+            }
+
+            path "sys/seal-status" {
+              capabilities = ["read"]
+            }
+        status_code: [200, 204]
+
+    - name: Create developer policy
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/policies/acl/developer"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          policy: |
+            # Developer policy - can read/write app secrets
+            path "secret/data/apps/*" {
+              capabilities = ["create", "read", "update", "delete", "list"]
+            }
+
+            # Can list secret engines
+            path "secret/metadata/apps/*" {
+              capabilities = ["list"]
+            }
+
+            # Read own token info
+            path "auth/token/lookup-self" {
+              capabilities = ["read"]
+            }
+
+            # Renew own token
+            path "auth/token/renew-self" {
+              capabilities = ["update"]
+            }
+        status_code: [200, 204]
+
+    - name: Create operations policy
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/policies/acl/operations"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          policy: |
+            # Operations policy - broader access for ops team
+            path "secret/data/*" {
+              capabilities = ["create", "read", "update", "delete", "list"]
+            }
+
+            path "secret/metadata/*" {
+              capabilities = ["list", "read", "delete"]
+            }
+
+            # Manage userpass users
+            path "auth/userpass/users/*" {
+              capabilities = ["create", "read", "update", "delete"]
+            }
+
+            # List auth methods and users
+            path "auth/userpass/users" {
+              capabilities = ["list"]
+            }
+
+            # Read system status
+            path "sys/health" {
+              capabilities = ["read"]
+            }
+
+            path "sys/seal-status" {
+              capabilities = ["read"]
+            }
+
+            # Token management
+            path "auth/token/lookup-self" {
+              capabilities = ["read"]
+            }
+
+            path "auth/token/renew-self" {
+              capabilities = ["update"]
+            }
+        status_code: [200, 204]
+
+    - name: Create nomad-server policy
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/policies/acl/nomad-server"
+        method: PUT
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          policy: |
+            # Nomad server policy for token creation
+            path "auth/token/create/nomad-cluster" {
+              capabilities = ["update"]
+            }
+
+            path "auth/token/roles/nomad-cluster" {
+              capabilities = ["read"]
+            }
+
+            # Allow Nomad to access secrets for jobs
+            path "secret/data/nomad/*" {
+              capabilities = ["read"]
+            }
+
+            path "secret/metadata/nomad/*" {
+              capabilities = ["list", "read"]
+            }
+        status_code: [200, 204]
+
+    - name: Enable secret engine for apps
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/mounts/secret"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          type: "kv-v2"
+          description: "KV store for application secrets"
+        status_code: [200, 204, 400]  # 400 if already exists
+
+    - name: Enable AppRole auth method
+      uri:
+        url: "http://{{ vault_addr }}/v1/sys/auth/approle"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          type: "approle"
+          description: "AppRole auth for services"
+        status_code: [200, 204, 400]  # 400 if already exists
+
+    - name: Check if admin user exists
+      uri:
+        url: "http://{{ vault_addr }}/v1/auth/userpass/users/{{ admin_username }}"
+        method: GET
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        status_code: [200, 404]
+      register: admin_user_check
+      ignore_errors: true
+
+    - name: Create admin user
+      uri:
+        url: "http://{{ vault_addr }}/v1/auth/userpass/users/{{ admin_username }}"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          password: "{{ admin_password }}"
+          policies: ["admin"]
+        status_code: [200, 204]
+      when: admin_user_check.status == 404
+
+    - name: Update admin user password (if user exists)
+      uri:
+        url: "http://{{ vault_addr }}/v1/auth/userpass/users/{{ admin_username }}/password"
+        method: POST
+        headers:
+          X-Vault-Token: "{{ vault_root_token }}"
+        body_format: json
+        body:
+          password: "{{ admin_password }}"
+        status_code: [200, 204]
+      when: admin_user_check.status == 200
+
+    - name: Test admin user login
+      uri:
+        url: "http://{{ vault_addr }}/v1/auth/userpass/login/{{ admin_username }}"
+        method: POST
+        body_format: json
+        body:
+          password: "{{ admin_password }}"
+      register: admin_login_test
+
+    - name: Display admin user info
+      debug:
+        msg: |
+          Admin user created successfully:
+          - Username: {{ admin_username }}
+          - Password: {{ admin_password }}
+          - Policies: admin
+          - Login token: {{ admin_login_test.json.auth.client_token }}
+
+          You can now login via:
+          - Web UI: http://{{ vault_addr }}
+          - CLI: vault auth -method=userpass username={{ admin_username }}

@@ -1,0 +1,1 @@
+console=serial0,115200 console=tty1 root=PARTUUID=a80ac2dc-02 rootfstype=ext4 fsck.repair=yes rootwait cfg80211.ieee80211_regdom=AT cgroup_enable=cpuset cgroup_enable=memory cgroup_memory=1

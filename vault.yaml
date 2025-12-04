@@ -1,0 +1,145 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install vault binary
+  gather_facts: false
+  hosts: server
+  become: true
+  vars:
+    vault_version: 1.20.3
+  tasks:
+    - name: Set architecture mapping for vault binary
+      set_fact:
+        vault_arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+
+    - name: Get system architecture
+      raw: uname -m | grep -E '(x86_64|aarch64)' || echo "unknown"
+      register: system_arch
+      changed_when: false
+
+    - name: Set vault architecture
+      set_fact:
+        vault_arch: "{{ 'amd64' if 'x86_64' in system_arch.stdout else 'arm64' if 'aarch64' in system_arch.stdout else 'unknown' }}"
+
+    - name: Create /opt/bin for binaries
+      raw: mkdir -p /opt/bin
+
+    - name: Create /etc/vault.d for configs
+      raw: mkdir -p /etc/vault.d
+
+    - name: Download vault archive
+      raw: wget -q -P /tmp https://releases.hashicorp.com/vault/{{ vault_version }}/vault_{{ vault_version }}_linux_{{ vault_arch }}.zip
+
+    - name: Extract vault archive
+      raw: |
+        if ! command -v unzip >/dev/null 2>&1; then
+          busybox unzip -o /tmp/vault_{{ vault_version }}_linux_{{ vault_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        else
+          unzip -o /tmp/vault_{{ vault_version }}_linux_{{ vault_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        fi
+
+    - name: Remove archive
+      raw: rm -rf /tmp/vault_{{ vault_version }}_linux_{{ vault_arch }}.zip
+
+    - name: Configure vault HCL
+      ansible.posix.synchronize:
+        src: files/vault.hcl
+        dest: /etc/vault.d/vault.hcl
+
+    - name: Configure vault service file
+      ansible.posix.synchronize:
+        src: files/vault-server.service
+        dest: /etc/systemd/system/vault.service
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable vault
+      raw: systemctl enable vault
+
+    - name: restart vault
+      raw: systemctl restart vault
+
+    - name: Wait for Vault to be ready
+      raw: |
+        for i in {1..30}; do
+          if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
+            echo "Vault is ready"
+            break
+          fi
+          echo "Waiting for Vault... ($i/30)"
+          sleep 5
+        done
+
+    - name: Check if Vault is already initialized
+      raw: curl -s http://localhost:8200/v1/sys/init | grep -o '"initialized":true' || echo "not_initialized"
+      register: vault_init_status
+      when: inventory_hostname == groups['server'][0]
+
+    - name: Initialize Vault (only on first server, only if not initialized)
+      raw: |
+        VAULT_ADDR=http://localhost:8200 /opt/bin/vault operator init \
+          -key-shares=5 \
+          -key-threshold=3 \
+          -format=json > /tmp/vault-init.json
+      when:
+        - inventory_hostname == groups['server'][0]
+        - "'not_initialized' in vault_init_status.stdout"
+
+    - name: Display initialization output
+      raw: cat /tmp/vault-init.json
+      register: vault_init_output
+      when:
+        - inventory_hostname == groups['server'][0]
+        - "'not_initialized' in vault_init_status.stdout"
+
+    - name: Save root token and recovery keys
+      raw: |
+        echo "IMPORTANT: Save these credentials securely!"
+        echo "Root Token: $(cat /tmp/vault-init.json | grep -o '"root_token":"[^"]*"' | cut -d'"' -f4)"
+        echo "Recovery Keys are in /tmp/vault-init.json"
+        cp /tmp/vault-init.json /etc/vault.d/vault-init-backup.json
+        chmod 600 /etc/vault.d/vault-init-backup.json
+        # Extract unseal keys for auto-unseal script
+        cat /tmp/vault-init.json | grep -o '"unseal_keys_b64":\[[^]]*\]' | sed 's/.*\[\(.*\)\].*/\1/' | tr ',' '\n' | sed 's/[" ]//g' > /etc/vault.d/unseal-keys
+        chmod 600 /etc/vault.d/unseal-keys
+      when:
+        - inventory_hostname == groups['server'][0]
+        - "'not_initialized' in vault_init_status.stdout"
+
+    - name: Create unseal keys file from local vault-credentials.json
+      raw: |
+        cat > /etc/vault.d/unseal-keys << 'EOF'
+        {% for key in (lookup('file', 'vault-credentials.json') | from_json)['unseal_keys_b64'] %}
+        {{ key }}
+        {% endfor %}
+        EOF
+        chmod 600 /etc/vault.d/unseal-keys
+
+    - name: Deploy unseal script
+      ansible.posix.synchronize:
+        src: files/vault-unseal.sh
+        dest: /etc/vault.d/vault-unseal.sh
+        perms: yes
+
+    - name: Make unseal script executable
+      raw: chmod +x /etc/vault.d/vault-unseal.sh
+
+    - name: Wait for Vault service to be fully ready after restart
+      raw: |
+        for i in {1..60}; do
+          if curl -s http://localhost:8200/v1/sys/seal-status >/dev/null 2>&1; then
+            echo "Vault API is responding"
+            break
+          fi
+          echo "Waiting for Vault API... ($i/60)"
+          sleep 2
+        done
+
+    - name: Auto-unseal all Vault instances
+      raw: /etc/vault.d/vault-unseal.sh
+      register: unseal_result
+      until: unseal_result.rc == 0
+      retries: 3
+      delay: 5

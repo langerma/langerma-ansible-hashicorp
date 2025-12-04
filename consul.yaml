@@ -1,0 +1,90 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install consul binary
+  gather_facts: false
+  hosts: all
+  become: true
+  vars:
+    consul_version: 1.21.5
+  tasks:
+    - name: Define expected Consul version
+      set_fact:
+        expected_consul_version: "{{ consul_version }}"
+
+    - name: Set architecture mapping for consul binary
+      set_fact:
+        consul_arch_map:
+          x86_64: "amd64"
+          aarch64: "arm64"
+        
+    - name: Get system architecture
+      raw: uname -m | grep -E '(x86_64|aarch64)' || echo "unknown"
+      register: system_arch
+      changed_when: false
+
+    - name: Set consul architecture
+      set_fact:
+        consul_arch: "{{ 'amd64' if 'x86_64' in system_arch.stdout else 'arm64' if 'aarch64' in system_arch.stdout else 'unknown' }}"
+
+    - name: Get Consul version
+      raw: "PATH=/opt/bin:$PATH consul version | awk '{print $2}' | tr -d 'v'"
+      register: host_consul_version
+      changed_when: false
+      ignore_errors: true # Prevents playbook failure if consul is missing
+
+    - name: Check if Consul is installed
+      debug:
+        msg: "Consul is not installed."
+      when: host_consul_version.rc != 0
+
+    - name: Debug Consul version
+      debug:
+        msg: "Installed Consul version is {{ host_consul_version.stdout }}"
+      when: host_consul_version.rc == 0
+
+    - name: Create /opt/bin for binaries
+      raw: mkdir -p /opt/bin
+
+    - name: Download Consul archive
+      raw: wget -q -P /tmp https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_{{ consul_arch }}.zip
+      #when:
+      #  - host_consul_version.rc != 0  # Runs if Consul is not installed
+      #  - or host_consul_version.stdout is not version(expected_consul_version, '==')  # Runs if the version is different
+
+    - name: Extract Consul archive
+      raw: |
+        if ! command -v unzip >/dev/null 2>&1; then
+          busybox unzip -o /tmp/consul_{{ consul_version }}_linux_{{ consul_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        else
+          unzip -o /tmp/consul_{{ consul_version }}_linux_{{ consul_arch }}.zip -x LICENSE.txt -d /opt/bin/
+        fi
+      #when:
+      #  - host_consul_version.rc != 0 # Runs if Consul is not installed
+      #  - or host_consul_version.stdout is not version(expected_consul_version, '==') # Runs if the version is different
+
+    - name: Remove archive
+      raw: rm -rf /tmp/consul_{{ consul_version }}_linux_{{ consul_arch }}.zip
+      #when:
+      #  - host_consul_version.rc != 0 # Runs if Consul is not installed
+      #  - or host_consul_version.stdout is not version(expected_consul_version, '==') # Runs if the version is different
+
+    - name: Configure server
+      ansible.posix.synchronize:
+        src: files/consul-server.service
+        dest: /etc/systemd/system/consul.service
+      when: "'server' in group_names"
+
+    - name: Configure client
+      ansible.posix.synchronize:
+        src: files/consul-client.service
+        dest: /etc/systemd/system/consul.service
+      when: "'client' in group_names"
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable consul
+      raw: systemctl enable consul
+
+    - name: restart consul
+      raw: systemctl restart consul

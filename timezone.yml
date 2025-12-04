@@ -1,0 +1,13 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install consul binary
+  gather_facts: false
+  hosts: all
+  become: true
+  vars:
+    consul_version: 1.20.4
+  tasks:
+    - name: Remove archive
+      raw: sudo timedatectl set-timezone Europe/Vienna
+    - name: wait and reboot
+      raw: reboot

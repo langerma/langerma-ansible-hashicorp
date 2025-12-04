@@ -1,0 +1,17 @@
+[Unit]
+Description=Vendor-neutral programmable observability pipelines.
+Documentation=https://grafana.com/docs/alloy/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Restart=always
+Environment=HOSTNAME=%H
+EnvironmentFile=/etc/default/alloy
+ExecStart=/opt/bin/alloy-linux-amd64 run --storage.path=/opt/alloy --server.http.listen-addr=0.0.0.0:12345 --disable-reporting --cluster.enabled --cluster.name=${CLUSTER_NAME} --cluster.advertise-interfaces=eth0,end0,end1,enp2s0 --cluster.join-addresses=${CLUSTER_JOIN_ADDRESSES} /etc/config.alloy
+ExecReload=/usr/bin/env kill -HUP $MAINPID
+TimeoutStopSec=20s
+SendSIGKILL=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,48 @@
+#!/usr/bin/env ansible-playbook
+---
+- name: install nomad binary
+  gather_facts: false
+  hosts: all
+  serial: 1
+  become: true
+  tasks:
+    - name: Configure server service file
+      ansible.posix.synchronize:
+        src: files/consul-server.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'server' in group_names"
+
+    - name: Configure client service file
+      ansible.posix.synchronize:
+        src: files/consul-client.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'client' in group_names"
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable consul
+      raw: systemctl enable consul
+
+    - name: restart consul
+      raw: systemctl restart consul
+    - name: Configure server service file
+      ansible.posix.synchronize:
+        src: files/nomad-server.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'server' in group_names"
+
+    - name: Configure client service file
+      ansible.posix.synchronize:
+        src: files/nomad-client.service
+        dest: /etc/systemd/system/nomad.service
+      when: "'client' in group_names"
+
+    - name: Daemon Reload
+      raw: systemctl daemon-reload
+
+    - name: enable nomad
+      raw: systemctl enable nomad
+
+    - name: restart nomad
+      raw: systemctl restart nomad
